@@ -11,7 +11,8 @@
         [leiningen.core
          [main :only [debug info abort]]
          [classpath :only [get-classpath]]]
-        [bultitude.core :only [namespaces-on-classpath]]))
+        [bultitude.core :only [namespaces-in-dir namespaces-on-classpath]])
+  (:import (java.io File BufferedReader PushbackReader InputStreamReader)))
 
 ;; ### Pre-compilation tasks
 
@@ -22,11 +23,11 @@
   [{{:keys [assets-path]} :android :as project}]
   (.mkdirs (io/file assets-path))
   (eval/eval-in-project
-   project
-   `(spit (io/file ~assets-path "data_readers.clj")
-          (into {} (map (fn [[k# v#]]
-                          [k# (symbol (subs (str v#) 2))])
-                        *data-readers*)))))
+    project
+    `(spit (io/file ~assets-path "data_readers.clj")
+           (into {} (map (fn [[k# v#]]
+                           [k# (symbol (subs (str v#) 2))])
+                         *data-readers*)))))
 
 (defn code-gen
   "Generates the R.java file from the resources.
@@ -76,18 +77,34 @@
 
 (defn namespaces-to-compile
   "Takes project and returns a set of namespaces that should be AOT-compiled."
-  [{{:keys [aot aot-exclude-ns]} :android :as project}]
-  (-> (case aot
-        :all
+  [{{:keys [aot aot-exclude-ns]} :android,
+    target-files :target-files,
+    root :root :as project}]
+  (info (str "target-files=" target-files))
+  (if (zero? (count target-files))
+    (-> (case aot
+          :all
           (seq (leiningen.compile/stale-namespaces (assoc project :aot :all)))
-        :all-with-unused
+          :all-with-unused
           (namespaces-on-classpath :classpath
                                    (map io/file (get-classpath project)))
-        ;; else
+          ;; else
           (map symbol aot))
-      set
-      (sets/union always-compile-ns)
-      (sets/difference (set (map symbol aot-exclude-ns)))))
+        set
+        (sets/union always-compile-ns)
+        (sets/difference (set (map symbol aot-exclude-ns))))
+    (doall
+      (for [file-path (set target-files)
+            :let [file (io/file (if (re-find #"^\/" file-path)
+                                  file-path
+                                  (str root "/" file-path)))]
+            :when (if (.exists file)
+                    (or (info (str "Compiling file: " file-path)) true)
+                    (info (str "file not found...skipping: " file)))
+            :let [ns-form (with-open [r (PushbackReader. (io/reader file))]
+                            (#'bultitude.core/read-ns-form r))]
+            :when ns-form]
+        ns-form))))
 
 (defn compile-clojure
   "Compiles Clojure files into .class files.
@@ -103,7 +120,7 @@
   debug-specific code when building the release."
   [{{:keys [enable-dynamic-compilation start-nrepl-server
             manifest-path repl-device-port ignore-log-priority]}
-    :android :as project}]
+    :android, target-files :target-files :as project}]
   (info "Compiling Clojure files...")
   (ensure-paths manifest-path)
   (debug "Project classpath:" (get-classpath project))
@@ -116,8 +133,8 @@
                       enable-dynamic-compilation
                       :neko.init/ignore-log-priority ignore-log-priority
                       :neko.init/package-name (get-package-name manifest-path)}
-                     (not dev-build) (assoc :elide-meta
-                                       [:doc :file :line :added :arglists]))]
+               (not dev-build) (assoc :elide-meta
+                                      [:doc :file :line :added :arglists]))]
     (info (format "Build type: %s, dynamic compilation: %s, remote REPL: %s."
                   (if dev-build "debug" "release")
                   (if (or dev-build start-nrepl-server
@@ -145,4 +162,14 @@
     (save-data-readers-to-resource project))
   (apply leiningen.javac/javac project args)
   (when-not java-only
-   (compile-clojure project)))
+    (compile-clojure project)))
+
+(defn compile-files
+  "Compiles both Java and Clojure source files."
+  [{{:keys [sdk-path]} :android, java-only :java-only :as project} & args]
+  (ensure-paths sdk-path)
+  (when-not java-only
+    (save-data-readers-to-resource project))
+  (apply leiningen.javac/javac project nil)
+  (when-not java-only
+    (compile-clojure (merge project {:target-files (first args)}))))

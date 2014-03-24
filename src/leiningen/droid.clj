@@ -7,7 +7,7 @@
   (:use [leiningen.core.project :only [merge-profiles unmerge-profiles]]
         [leiningen.core.main :only [abort]]
         [leiningen.help :only (subtask-help-for)]
-        [leiningen.droid.compile :only (compile clean-compile-dir code-gen)]
+        [leiningen.droid.compile :only (compile-files compile clean-compile-dir code-gen)]
         [leiningen.droid
          [classpath :only [init-hooks]]
          [build :only [create-dex create-obfuscated-dex
@@ -74,6 +74,7 @@
 
 (defn ^{:no-project-needed true
         :subtasks [#'new #'init #'code-gen #'compile
+                   #'compile-files
                    #'create-dex #'create-obfuscated-dex
                    #'crunch-resources #'package-resources
                    #'create-apk #'sign-apk #'zipalign-apk
@@ -105,6 +106,7 @@
     "code-gen" (code-gen project)
     "clean-compile-dir" (clean-compile-dir project)
     "compile" (compile project)
+    "compile-files" (compile-files project args)
     "create-dex" (create-dex project)
     "create-obfuscated-dex" (create-obfuscated-dex project)
     "crunch-resources" (crunch-resources project)
