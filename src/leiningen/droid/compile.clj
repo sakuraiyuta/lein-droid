@@ -169,7 +169,4 @@
   [{{:keys [sdk-path]} :android, java-only :java-only :as project} & args]
   (ensure-paths sdk-path)
   (when-not java-only
-    (save-data-readers-to-resource project))
-  (apply leiningen.javac/javac project nil)
-  (when-not java-only
     (compile-clojure (merge project {:target-files (first args)}))))
